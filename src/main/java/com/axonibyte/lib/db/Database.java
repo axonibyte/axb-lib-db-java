@@ -35,32 +35,17 @@ import java.util.zip.ZipInputStream;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Handles interactions with the database.
  *
  * @author Caleb L. Power <cpower@axonibyte.com>
  */
 public class Database {
-  
-  private static Database instance = null;
-  
-  /**
-   * Retrieves the {@link Database} instance.
-   *
-   * @return a {@link Database} object
-   */
-  public static Database getInstance() {
-    return instance;
-  }
-  
-  /**
-   * Sets the {@link Database} instance.
-   *
-   * @param instance the {@link Database} instance
-   */
-  public static void setInstance(Database instance) {
-    Database.instance = instance;
-  }
+
+  private static final Logger logger = LoggerFactory.getLogger(Database.class);
   
   private HikariConfig hikariConfig = null;
   private HikariDataSource hikariDataSource = null;
@@ -126,8 +111,13 @@ public class Database {
             ssl));
     this.hikariConfig.setUsername(username);
     this.hikariConfig.setPassword(password);
-    for(var property : properties.entrySet())
+    for(var property : properties.entrySet()) {
+      logger.info(
+          "Adding Hikiri data source property {}={}",
+          property.getKey(),
+          property.getValue());
       this.hikariConfig.addDataSourceProperty(property.getKey(), property.getValue());
+    }
     this.hikariDataSource = new HikariDataSource(hikariConfig);
   }
   
@@ -137,7 +127,8 @@ public class Database {
    * @return a {@link Connection} object
    * @throws SQLException if a database error occurs
    */
-  public Connection getConnection() throws SQLException {
+  public Connection connect() throws SQLException {
+    logger.info("Obtaining database connection.");
     return hikariDataSource.getConnection();
   }
   
@@ -168,15 +159,24 @@ public class Database {
    */
   public void close(Connection con, PreparedStatement stmt, ResultSet res) {
     try {
-      if(null != res) res.close();
+      if(null != res) {
+        logger.info("Closing result set.");
+        res.close();
+      }
     } catch(SQLException e) { }
     
     try {
-      if(null != stmt) stmt.close();
+      if(null != stmt) {
+        logger.info("Closing statement.");
+        stmt.close();
+      }
     } catch(SQLException e) { }
     
     try {
-      if(null != con) con.close();
+      if(null != con) {
+        logger.info("Closing connection.");
+        con.close();
+      }
     } catch(SQLException e) { }
   }
   
@@ -188,7 +188,7 @@ public class Database {
    * @throws SQLException if there's a database malfunction
    */
   public void setup(Class<?> clazz, String parent) throws SQLException {
-    Connection con = getConnection();
+    Connection con = connect();
     PreparedStatement stmt = null;
     Set<String> fileList = new TreeSet<>();
     
@@ -209,6 +209,7 @@ public class Database {
     
     for(var file : fileList) {
       String resource = null;
+      logger.info("Reading database bootstrap script {}", file);
       
       try(
           BufferedReader reader = new BufferedReader(
