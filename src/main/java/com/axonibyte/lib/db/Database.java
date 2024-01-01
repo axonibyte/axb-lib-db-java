@@ -198,10 +198,10 @@ public class Database {
       try(ZipInputStream zip = new ZipInputStream(jar.openStream())) {
         ZipEntry entry = null;
         while(null != (entry = zip.getNextEntry())) {
-          logger.debug("Checking if entry {} is a SQL script.");
           var file = entry.getName();
+          logger.debug("Checking if entry {} is a SQL script.", file);
           if(file.matches(parent + "/.*\\.sql")) {
-            logger.debug("Entry {} is a SQL script, queueing.");
+            logger.debug("Entry {} is a SQL script, queueing.", file);
             fileList.add(file);
           }
         }
