@@ -198,40 +198,49 @@ public class Database {
       try(ZipInputStream zip = new ZipInputStream(jar.openStream())) {
         ZipEntry entry = null;
         while(null != (entry = zip.getNextEntry())) {
+          logger.debug("Checking if entry {} is a SQL script.");
           var file = entry.getName();
-          if(file.matches(parent + "/.*\\.sql"))
+          if(file.matches(parent + "/.*\\.sql")) {
+            logger.debug("Entry {} is a SQL script, queueing.");
             fileList.add(file);
+          }
         }
       } catch(IOException e) {
+        logger.error("Failed to read jar.");
         e.printStackTrace();
       }
-    }
-    
-    for(var file : fileList) {
-      String resource = null;
-      logger.info("Reading database bootstrap script {}", file);
-      
-      try(
-          BufferedReader reader = new BufferedReader(
-              new InputStreamReader(
-                  getClass().getClassLoader().getResourceAsStream(file),
-                  StandardCharsets.UTF_8))) {
-        StringBuilder resBuilder = new StringBuilder();
-        for(String line; null != (line = reader.readLine()); resBuilder.append(line.trim()).append(' '));
-        resource = resBuilder.deleteCharAt(resBuilder.length() - 1).toString();
-        stmt = con.prepareStatement(
-            resource.replace("${database}", dbName).replace("${prefix}", dbPrefix));
-        stmt.execute();
-      } catch(IOException e) {
-        if(null == resource)
-          throw new SQLException(
-              "Database bootstrap scripts could not be read.");
-      } finally {
-        if(null != stmt)
-          try {
-            stmt.close();
-          } catch(SQLException e) { }
+    } else logger.error("Could not retrieve class protection domain!");
+
+    try {
+      for(var file : fileList) {
+        String resource = null;
+        logger.info("Reading database bootstrap script {}", file);
+        
+        try(
+            BufferedReader reader = new BufferedReader(
+                new InputStreamReader(
+                    getClass().getClassLoader().getResourceAsStream(file),
+                    StandardCharsets.UTF_8))) {
+          StringBuilder resBuilder = new StringBuilder();
+          for(
+              String line;
+              null != (line = reader.readLine());
+              resBuilder.append(line.trim()).append(' '));
+          resource = resBuilder.deleteCharAt(resBuilder.length() - 1).toString();
+          stmt = con.prepareStatement(
+              resource.replace("${database}", dbName).replace("${prefix}", dbPrefix));
+          stmt.execute();
+        } finally {
+          close(null, stmt, null);
+        }
       }
+    } catch(IOException e) {
+      throw new SQLException(
+          "Database bootstrap scripts could not be read.");
+    } catch(SQLException e) {
+      throw e;
+    } finally {
+      close(con, null, null);
     }
   }
   
