@@ -1,6 +1,6 @@
 # Axonibyte Java Library Suite - Database
 
-Copyright (c) 2023 Axonibyte Innovations, LLC. All rights reserved.
+Copyright (c) 2021-2024 Axonibyte Innovations, LLC. All rights reserved.
 
 This Java library handles database interactions, SQL parsing, and table mappings
 for Java software. While there are a variety of libraries available to interact
