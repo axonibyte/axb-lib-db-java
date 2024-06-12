@@ -8,7 +8,7 @@ apply plugin: 'maven-publish'
 apply plugin: 'com.github.johnrengelman.shadow'
 
 repositories {
-  jcenter()
+  mavenCentral()
   maven { url "https://jitpack.io" }
 }
 
@@ -31,6 +31,12 @@ eclipse {
   classpath {
     downloadJavadoc = true
     downloadSources = true
+  }
+}
+
+test {
+  useTestNG() {
+    suites 'src/test/resources/testng.xml'
   }
 }
 

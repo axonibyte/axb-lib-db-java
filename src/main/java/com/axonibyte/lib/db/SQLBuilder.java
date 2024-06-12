@@ -153,6 +153,7 @@ public class SQLBuilder {
   private Entry<String, String> table = null;
   private List<String> columns = new ArrayList<>(); // columns to retrieve/modify
   private List<Entry<String, Comparison>> filters = new ArrayList<>(); // filters for the WHERE clause
+  private List<String> groupBy = new ArrayList<>(); // columns to group by
   // joins = [ { JOIN, { { TABLE, ALIAS }, { LEFT, { RIGHT, COMPARISON } } } }, ... ]
   private List<Entry<Join, Entry<Entry<String, String>, Entry<String, Entry<String, Comparison>>>>> joins = new ArrayList<>();
   private Map<Integer, Boolean> conjunctions = new HashMap<>();
@@ -411,6 +412,17 @@ public class SQLBuilder {
     filters.add(new SimpleEntry<>(column.toString(), comparison));
     return this;
   }
+
+  /**
+   * Adds a column or set of columns to a GROUP BY clause.
+   *
+   * @param columns a varargs array of column names
+   */
+  public SQLBuilder group(Object... columns) {
+    for(var column : columns)
+      groupBy.add(column.toString());
+    return this;
+  }
   
   /**
    * Adds an ORDER BY clause.
@@ -565,6 +577,17 @@ public class SQLBuilder {
             || useOr && filters.size() - 1 == i)
           stringBuilder.insert(stringBuilder.length() - 1, ")");
       }
+    }
+
+    // append GROUP BY clause if groups are specified
+    int groupCount = 0;
+    for(var groupEntry : groupBy) {
+      if(groupCount++ == 0)
+        stringBuilder.append("GROUP BY ");
+      else stringBuilder.insert(stringBuilder.length() - 1, ',');
+      stringBuilder
+          .append(groupEntry)
+          .append(' ');
     }
     
     // append ORDER BY clause if order is specified
