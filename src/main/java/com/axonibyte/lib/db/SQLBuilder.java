@@ -305,33 +305,192 @@ public class SQLBuilder {
     columns.add(column.toString());
     return this;
   }
-  
+
   /**
-   * Specifies that one of the columns should be a result count.
+   * Specifies an additional column with an alias for some statement.
    *
-   * @param column the name of the returned column
+   * @param column the name of the column in question
+   * @param alias the alias of the returned column
    * @return this SQLBuilder object
    */
-  public SQLBuilder count(Object column) {
-    columns.add(
+  public SQLBuilder column(Object column, String alias) {
+    return column(
         String.format(
-            "COUNT(*) AS %1$s",
-            column.toString()));
-    return this;
+            "%1$s AS %2$s",
+            column.toString(),
+            alias));
+  }
+
+  /**
+   * Specifies that some function should be used in a returned column.
+   *
+   * @param fn the name of the function (without parantheses)
+   * @param args the function arguments
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder fn(String fn, Object... args) {
+    StringBuilder sb = new StringBuilder();
+    for(var arg : args) {
+      if(!sb.isEmpty())
+        sb.append(", ");
+      sb.append(arg.toString());
+    }
+    
+    return column(
+        String.format(
+            "%1$s(%2$s)",
+            fn,
+            sb.toString()));
+  }
+
+  /**
+   * Specifies that some function should be used in a returned (aliased) column.
+   *
+   * @param fn the name of the function (without parantheses)
+   * @param alias the alias of the returned column
+   * @param args the function arguments
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder fn(String fn, String alias, Object... args) {
+    StringBuilder sb = new StringBuilder();
+    for(var arg : args) {
+      if(!sb.isEmpty())
+        sb.append(", ");
+      sb.append(arg.toString());
+    }
+    
+    return column(
+        String.format(
+            "%1$s(%2$s)",
+            fn,
+            sb.toString()),
+        alias);
+  }
+
+  /**
+   * Specifies that the AVG function should invoked on a column.
+   *
+   * @param column the name of the column or wildcard
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder avg(Object column) {
+    return fn("AVG", column);
+  }
+
+  /**
+   * Specifies that the AVG function should be voked on an aliased column.
+   *
+   * @param column the name of the column or wildcard
+   * @param alias the column alias
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder avg(Object column, String alias) {
+    return fn("AVG", alias, column);
   }
   
   /**
-   * Specifies that one of the columns should be summed.
+   * Specifies that the COUNT function should invoked on a column.
    *
-   * @param column the name of the column to be counted and returned
+   * @param column the name of the column or wildcard
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder count(Object column) {
+    return fn("COUNT", column);
+  }
+
+  /**
+   * Specifies that the COUNT function should be voked on an aliased column.
+   *
+   * @param column the name of the column or wildcard
+   * @param alias the column alias
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder count(Object column, String alias) {
+    return fn("COUNT", alias, column);
+  }
+
+  /**
+   * Specifies that the DISTINCT function should invoked on a column.
+   *
+   * @param column the name of the column or wildcard
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder distinct(Object column) {
+    return fn("DISTINCT", column);
+  }
+
+  /**
+   * Specifies that the DISTINCT function should be voked on an aliased column.
+   *
+   * @param column the name of the column or wildcard
+   * @param alias the column alias
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder distinct(Object column, String alias) {
+    return fn("DISTINCT", alias, column);
+  }
+
+  /**
+   * Specifies that the MAX function should invoked on a column.
+   *
+   * @param column the name of the column or wildcard
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder max(Object column) {
+    return fn("MAX", column);
+  }
+
+  /**
+   * Specifies that the MAX function should be voked on an aliased column.
+   *
+   * @param column the name of the column or wildcard
+   * @param alias the column alias
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder max(Object column, String alias) {
+    return fn("MAX", alias, column);
+  }
+
+  /**
+   * Specifies that the MIN function should invoked on a column.
+   *
+   * @param column the name of the column or wildcard
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder min(Object column) {
+    return fn("MIN", column);
+  }
+
+  /**
+   * Specifies that the MIN function should be voked on an aliased column.
+   *
+   * @param column the name of the column or wildcard
+   * @param alias the column alias
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder min(Object column, String alias) {
+    return fn("MIN", alias, column);
+  }
+  
+  /**
+   * Specifies that the SUM function should invoked on a column.
+   *
+   * @param column the name of the column or wildcard
    * @return this SQLBuilder object
    */
   public SQLBuilder sum(Object column) {
-    columns.add(
-        String.format(
-            "SUM(%1$s) AS %1$s",
-            column));
-    return this;
+    return fn("SUM", column);
+  }
+
+  /**
+   * Specifies that the SUM function should be voked on an aliased column.
+   *
+   * @param column the name of the column or wildcard
+   * @param alias the column alias
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder sum(Object column, String alias) {
+    return fn("SUM", alias, column);
   }
   
   /**

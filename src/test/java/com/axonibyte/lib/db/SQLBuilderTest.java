@@ -201,6 +201,19 @@ public class SQLBuilderTest {
         sqlBuilder.toString(),
         "SELECT column_foo FROM my_table WHERE column_foo = ? AND (column_bar = ? OR column_baz = ? OR column_qaz = ?)");
   }
+
+  /**
+   * Tests {@link SQLBuilder#fn(String, String, Object...)} to ensure that custom
+   * functions can be utilized.
+   */
+  @Test public void testFn() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .select("my_table")
+        .fn("FOO", "foo_alias", "bar", "baz");
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT FOO(bar, baz) AS foo_alias FROM my_table");
+  }
   
   /**
    * Tests {@link SQLBuilder#count(Object)} to ensure that
@@ -209,7 +222,7 @@ public class SQLBuilderTest {
   @Test public void testCount() {
     SQLBuilder sqlBuilder = new SQLBuilder()
         .select("my_table")
-        .count("count_foo");
+        .count("*", "count_foo");
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT COUNT(*) AS count_foo FROM my_table");
