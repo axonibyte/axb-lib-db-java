@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2023 Axonibyte Innovations, LLC. All rights reserved.
+ * Copyright (c) 2021-2024 Axonibyte Innovations, LLC. All rights reserved.
  *
  *   Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
@@ -102,7 +102,17 @@ public class SQLBuilder {
     /**
      * Get values other than the needle.
      */
-    NOT_EQUAL_TO(" <> ? ");
+    NOT_EQUAL_TO(" <> ? "),
+
+    /**
+     * Needle is null.
+     */
+    IS_NULL(" IS NULL "),
+
+    /**
+     * Needle is not null.
+     */
+    IS_NOT_NULL(" IS NOT NULL ");
     
     private String op = null;
     
