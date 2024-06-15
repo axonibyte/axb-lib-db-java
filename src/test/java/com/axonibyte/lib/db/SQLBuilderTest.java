@@ -21,7 +21,6 @@ import com.axonibyte.lib.db.SQLBuilder.Comparison;
 import com.axonibyte.lib.db.SQLBuilder.Order;
 
 import org.testng.Assert;
-import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 /**
@@ -392,6 +391,92 @@ public class SQLBuilderTest {
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN my_other_table b ON a.xyzzy = b.yeet");
+  }
+
+  /**
+   * Tests {@link SQLBuilder#select(SQLBuilder, String)} to ensure that selections
+   * with subqueried tables can be constructed properly.
+   */
+  @Test public void testSelectSubquery() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .select(
+            new SQLBuilder()
+                .select("table_inner", "foo", "bar"),
+            "a",
+            "baz",
+            "bux");
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT baz, bux FROM ( SELECT foo, bar FROM table_inner ) a");
+  }
+
+  /**
+   * Tests {@link SQLBuilder#column(SQLBuilder, String)} to ensure that columns
+   * with subqueries can be incorporated into the statement.
+   */
+  @Test public void testColumnSubquery() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .select("foo", "bar", "baz")
+        .column(
+            new SQLBuilder()
+                .select("table_inner", "xyzzy", "yeet"),
+            "a");
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT bar, baz, ( SELECT xyzzy, yeet FROM table_inner ) AS a FROM foo");
+  }
+
+  /**
+   * Tests {@link SQLBuilder#join(Join, SQLBuilder, String, Object, Object, Comparison)}
+   * to ensure that complicated joins with subqueries can be built.
+   */
+  @Test public void testJoinSubquery() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+      .select(
+          "my_table",
+          "a.foo",
+          "a.bar",
+          "b.baz")
+      .tableAlias("a")
+      .join(
+          SQLBuilder.Join.INNER,
+          new SQLBuilder().select("inner", "i_alpha", "i_beta"),
+          "b",
+          new SQLBuilder().select("left", "l_alpha", "l_beta"),
+          new SQLBuilder().select("right", "r_alpha", "r_beta"),
+          Comparison.EQUAL_TO);
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN ( SELECT i_alpha, i_beta FROM inner ) b ON ( SELECT l_alpha, l_beta FROM left ) = ( SELECT r_alpha, r_beta FROM right )");
+  }
+
+  /**
+   * Tests {@link SQLBuilder#whereIn(Object, int)} to make sure that WHERE IN
+   * clauses can be built.
+   */
+  @Test public void testWhereIn() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .select("my_table", "foo", "bar")
+        .whereIn("baz", 3);
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT foo, bar FROM my_table WHERE baz IN (?, ?, ?)");
+  }
+
+  /**
+   * Tests {@link SQLBuilder#where(Object, Comparison, SQLBuilder)} to ensure
+   * that subqueries can be added to WHERE clauses
+   */
+  @Test public void testWhereSubquery() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .select("my_table", "foo", "bar")
+        .where(
+            "baz",
+            Comparison.GREATER_THAN,
+            new SQLBuilder().select("inner").max("yeet"));
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT foo, bar FROM my_table WHERE baz > ( SELECT MAX(yeet) FROM inner )");
   }
 
   /**

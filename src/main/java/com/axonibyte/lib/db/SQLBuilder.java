@@ -112,7 +112,12 @@ public class SQLBuilder {
     /**
      * Needle is not null.
      */
-    IS_NOT_NULL(" IS NOT NULL ");
+    IS_NOT_NULL(" IS NOT NULL "),
+
+    /**
+     * Needle is in a collection.
+     */
+    IN(" IN ? ");
     
     private String op = null;
     
@@ -162,7 +167,7 @@ public class SQLBuilder {
   private int offset = 0;
   private Entry<String, String> table = null;
   private List<String> columns = new ArrayList<>(); // columns to retrieve/modify
-  private List<Entry<String, Comparison>> filters = new ArrayList<>(); // filters for the WHERE clause
+  private List<Entry<String, String>> filters = new ArrayList<>(); // filters for the WHERE clause
   private List<String> groupBy = new ArrayList<>(); // columns to group by
   // joins = [ { JOIN, { { TABLE, ALIAS }, { LEFT, { RIGHT, COMPARISON } } } }, ... ]
   private List<Entry<Join, Entry<Entry<String, String>, Entry<String, Entry<String, Comparison>>>>> joins = new ArrayList<>();
@@ -176,12 +181,30 @@ public class SQLBuilder {
    * Begins SELECT statement with multiple columns.
    * 
    * @param table the name of the table from which data is retrieved
-   * @param columns that will be selected
+   * @param columns the columns to be selected
    * @return this SQLBuilder object
    */
   public SQLBuilder select(String table, Object... columns) {
     select(table);
     for(var column : columns) column(column);
+    return this;
+  }
+
+  /**
+   * Begins SELECT statement with multiple columns and a subquery instead of a table.
+   *
+   * @param subquery a subquery, the results of which will be queried
+   * @param alias the returned subquery result alias
+   * @param columns the columns to be selected
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder select(SQLBuilder subquery, String alias, Object... columns) {
+    select(
+        String.format(
+            "( %1$s )",
+            subquery.toString()),
+        columns);
+    tableAlias(alias);
     return this;
   }
   
@@ -194,6 +217,22 @@ public class SQLBuilder {
   public SQLBuilder select(String table) {
     this.statement = Statement.SELECT;
     this.table = new SimpleEntry<>(table, null);
+    return this;
+  }
+
+  /**
+   * Begins SELECT statement with a subquery instead of a table.
+   *
+   * @param subquery a subquery, the results of which will be queried
+   * @param columns the columns to be selected
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder select(SQLBuilder subquery, String alias) {
+    select(
+        String.format(
+            "( %1$s )",
+            subquery.toString()));
+    tableAlias(alias);
     return this;
   }
   
@@ -319,6 +358,21 @@ public class SQLBuilder {
             "%1$s AS %2$s",
             column.toString(),
             alias));
+  }
+
+  /**
+   * Specifies a subquery to be returned as a column with an alias.
+   *
+   * @param subquery the subquery for which results will be returned
+   * @param alias the alias of the returned column
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder column(SQLBuilder subquery, String alias) {
+    return column(
+        String.format(
+            "( %1$s )",
+            subquery.toString()),
+        alias);
   }
 
   /**
@@ -504,16 +558,49 @@ public class SQLBuilder {
    * @param comparison the operation of comparison between left and right columns
    * @return this SQLBuilder object
    */
-  public SQLBuilder join(Join join, String table, String alias, String left, String right, Comparison comparison) {
+  public SQLBuilder join(Join join, String table, String alias, Object left, Object right, Comparison comparison) {
     joins.add(
         new SimpleEntry<>(
             join,
             new SimpleEntry<>(
                 new SimpleEntry<>(table, alias),
                 new SimpleEntry<>(
-                    left,
-                    new SimpleEntry<>(right, comparison)))));
+                    left instanceof SQLBuilder
+                        ? String.format(
+                            "( %1$s )",
+                            left.toString())
+                        : left.toString(),
+                    new SimpleEntry<>(
+                        right instanceof SQLBuilder
+                            ? String.format(
+                                "( %1$s )",
+                                right.toString())
+                            : right.toString(),
+                        comparison)))));
     return this;
+  }
+
+  /**
+   * Applies a join operation to the query.
+   *
+   * @param join the type of {@link Join} to be used
+   * @param subquery a subquery to be executed for the new side of the join operation
+   * @param alias the alias for the joining table
+   * @param left the first column that is to be matched
+   * @param right the right column that is to be matched
+   * @param comparison the operation of comparison between left and right columns
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder join(Join join, SQLBuilder subquery, String alias, Object left, Object right, Comparison comparison) {
+    return join(
+        join,
+        String.format(
+            "( %1$s )",
+            subquery.toString()),
+        alias,
+        left,
+        right,
+        comparison);
   }
   
   /**
@@ -572,13 +659,59 @@ public class SQLBuilder {
   
   /**
    * Adds a specific column to WHERE clause.
+   *
+   * Note that {@link Comparison#IN} is invalid here--use
+   * {@link SQLBuilder#whereIn(Object, int)} instead.
    * 
    * @param column the column
    * @param comparison the comparison operation
    * @return this SQLBuilder object
    */
   public SQLBuilder where(Object column, Comparison comparison) {
-    filters.add(new SimpleEntry<>(column.toString(), comparison));
+    if(Comparison.IN == comparison)
+      throw new IllegalArgumentException("Comparison.IN is not valid for this method.");
+    filters.add(new SimpleEntry<>(column.toString(), comparison.getOp()));
+    return this;
+  }
+
+  /**
+   * Adds an IN comparison to a WHERE clause.
+   *
+   * @param colum the name of the column
+   * @param count the number of items in the collection
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder whereIn(Object column, int count) {
+    StringBuilder sb = new StringBuilder("(");
+    for(int i = 0; i < count; i++) {
+      if(0 < i) sb.append(", ");
+      sb.append("?");
+    }
+    sb.append(")");
+    filters.add(
+        new SimpleEntry<>(
+            column.toString(),
+            Comparison.IN.getOp().replace("?", sb.toString())));
+    return this;
+  }
+
+  /**
+   * Adds a subquery to WHERE clause.
+   *
+   * @param column the column
+   * @param comparison the comparison operation
+   * @param subquery the subquery for comparison
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder where(Object column, Comparison comparison, SQLBuilder subquery) {
+    filters.add(
+        new SimpleEntry<>(
+            column.toString(),
+            comparison.getOp().replace(
+                "?",
+                String.format(
+                    "( %1$s )",
+                    subquery.toString()))));
     return this;
   }
 
@@ -741,7 +874,7 @@ public class SQLBuilder {
         if(conjunctions.containsKey(i + 1) && conjunctions.get(i + 1))
           stringBuilder.append("(");
         stringBuilder.append(filters.get(i).getKey());
-        stringBuilder.append(filters.get(i).getValue().getOp());
+        stringBuilder.append(filters.get(i).getValue());
         if(conjunctions.containsKey(i + 1) && !conjunctions.get(i + 1)
             || useOr && filters.size() - 1 == i)
           stringBuilder.insert(stringBuilder.length() - 1, ")");
