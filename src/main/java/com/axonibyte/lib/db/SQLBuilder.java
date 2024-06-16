@@ -18,6 +18,7 @@ package com.axonibyte.lib.db;
 import java.nio.ByteBuffer;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -98,7 +99,9 @@ public class SQLBuilder {
   private List<Entry<String, String>> filters = new ArrayList<>(); // filters for the WHERE clause
   private List<String> groupBy = new ArrayList<>(); // columns to group by
   // joins = [ { JOIN, { { TABLE, ALIAS }, { LEFT, { RIGHT, COMPARISON } } } }, ... ]
-  private List<Entry<Join, Entry<Entry<String, String>, Entry<String, Entry<String, ComparisonOp>>>>> joins = new ArrayList<>();
+  //private List<Entry<Join, Entry<Entry<String, String>, Entry<String, Entry<String, ComparisonOp>>>>> joins = new ArrayList<>();
+  // joins = [ { JOIN, { { TABLE, ALIAS }, [ COMPARISON... ] } } ]
+  private List<Entry<Join, Entry<Entry<String, String>, List<Comparison>>>> joins = new ArrayList<>();
   private Map<Integer, Boolean> conjunctions = new HashMap<>();
   private Map<String, Order> orderBy = new LinkedHashMap<>();
   private Statement statement = null;
@@ -481,30 +484,16 @@ public class SQLBuilder {
    * @param join the type of {@link Join} to be used
    * @param table the name of the table to be joined
    * @param alias the alias for the joining table
-   * @param left the first column that is to be matched
-   * @param right the right column that is to be matched
-   * @param comparison the operation of comparison between left and right columns
+   * @param comparisons the comparisons used for this join
    * @return this SQLBuilder object
    */
-  public SQLBuilder join(Join join, String table, String alias, Object left, Object right, ComparisonOp op) {
+  public SQLBuilder join(Join join, String table, String alias, Comparison... comparisons) {
     joins.add(
         new SimpleEntry<>(
             join,
             new SimpleEntry<>(
                 new SimpleEntry<>(table, alias),
-                new SimpleEntry<>(
-                    left instanceof SQLBuilder
-                        ? String.format(
-                            "( %1$s )",
-                            left.toString())
-                        : left.toString(),
-                    new SimpleEntry<>(
-                        right instanceof SQLBuilder
-                            ? String.format(
-                                "( %1$s )",
-                                right.toString())
-                            : right.toString(),
-                        op)))));
+                Arrays.asList(comparisons))));
     return this;
   }
 
@@ -514,21 +503,17 @@ public class SQLBuilder {
    * @param join the type of {@link Join} to be used
    * @param subquery a subquery to be executed for the new side of the join operation
    * @param alias the alias for the joining table
-   * @param left the first column that is to be matched
-   * @param right the right column that is to be matched
-   * @param comparison the operation of comparison between left and right columns
+   * @param comparison the comparisons used for this join
    * @return this SQLBuilder object
    */
-  public SQLBuilder join(Join join, SQLBuilder subquery, String alias, Object left, Object right, ComparisonOp op) {
+  public SQLBuilder join(Join join, SQLBuilder subquery, String alias, Comparison... comparisons) {
     return join(
         join,
         String.format(
             "( %1$s )",
             subquery.toString()),
         alias,
-        left,
-        right,
-        op);
+        comparisons);
   }
   
   /**
@@ -791,10 +776,32 @@ public class SQLBuilder {
           .append(join.getValue().getKey().getKey())
           .append(" ")
           .append(join.getValue().getKey().getValue())
-          .append(" ON ")
-          .append(join.getValue().getValue().getKey())
-          .append(join.getValue().getValue().getValue().getValue().getOp()
-              .replace("?", join.getValue().getValue().getValue().getKey()));
+          .append(" ON ");
+
+      StringBuilder compSB = new StringBuilder();
+      var comps = join.getValue().getValue();
+      if(1 < comps.size())
+        compSB.append("( ");
+      for(int i = 0; i < comps.size(); i++) {
+        if(0 < i)
+          compSB.append(
+              comps.get(i - 1).isOr()
+                  ? "OR "
+                  : "AND ");
+        var comp = comps.get(i);
+        compSB
+            .append(comp.left())
+            .append(
+                null == comp.right()
+                    ? comp.op().getOp()
+                    : comp.op().getOp().replace(
+                        "?",
+                        comp.right()));        
+      }
+      if(1 < comps.size())
+        compSB.append(") ");
+
+      stringBuilder.append(compSB);
     }
     
     // append WHERE clause if filters exist

@@ -15,7 +15,14 @@
  */
 package com.axonibyte.lib.db;
 
+/**
+ * Models a SQL comparison.
+ *
+ * @author Caleb L. Power <cpower@axonibyte.com>
+ */
 public class Comparison {
+
+  private boolean or = false;
 
   /**
    * The operation to use when filtering values.
@@ -77,7 +84,7 @@ public class Comparison {
     /**
      * Needle is not in a collection.
      */
-    NOT_IN(" NOT IN ?");
+    NOT_IN(" NOT IN ? ");
     
     private String op = null;
     
@@ -94,6 +101,85 @@ public class Comparison {
       return op;
     }
     
+  }
+
+  private ComparisonOp op = null;
+  private String left = null;
+  private String right = null;
+
+  /**
+   * Instantiates a {@link Comparison}.
+   *
+   * Note that {@code right} can be {@code null} if the op would otherwise make
+   * {@code right} a NOP. If specified in these cases, {@code right} is still
+   * ignored.
+   *
+   * @param left the left side of the comparison
+   * @param right the right side of the comparison
+   * @param op the {@link ComparisonOp}
+   */
+  public Comparison(Object left, Object right, ComparisonOp op) {
+    this.op = op;
+    this.left = left instanceof SQLBuilder
+        ? String.format(
+            "( %1$s )",
+            left.toString())
+        : left.toString();
+    this.right = null == right
+        ? null
+        : right instanceof SQLBuilder
+            ? String.format(
+                "( %1$s )",
+                right.toString())
+        : right.toString();
+  }
+
+  /**
+   * Retrieves the comparison operator.
+   *
+   * @return the {@link ComparisonOp}
+   */
+  public ComparisonOp op() {
+    return op;
+  }
+
+  /**
+   * Retrieves the left side of the comparison.
+   *
+   * @return the {@link String} representation of the left side of the comparison
+   */
+  public String left() {
+    return left;
+  }
+
+  /**
+   * Retrieves the right side of the comparison.
+   *
+   * @return the {@link String} representation of the right side of the comparison
+   */
+  public String right() {
+    return right;
+  }
+
+  /**
+   * Use an OR conjunction in the next {@link Comparison}. (Really only useful
+   * for JOIN conditions.
+   *
+   * @return this {@link Comparison} instance
+   */
+  public Comparison or() {
+    this.or = true;
+    return this;
+  }
+
+  /**
+   * Determines whether or not to use the OR conjunction in the following
+   * {@link Comparison}. If {@code false}, use AND instead (default).
+   *
+   * @return {@code true} iff we should use OR next time
+   */
+  public boolean isOr() {
+    return or;
   }
   
 }

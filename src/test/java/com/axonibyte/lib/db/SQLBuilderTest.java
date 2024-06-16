@@ -336,7 +336,7 @@ public class SQLBuilderTest {
   }
 
   /**
-   * Tests {@link SQLBuilder#delete(String)} and {@link SQLBuilder#where(String, Comparison)}
+   * Tests {@link SQLBuilder#delete(String)} and {@link SQLBuilder#where(String, ComparisonOp)}
    * to ensure that a statement for deleting a set of records from the database
    * can be generated.
    */
@@ -370,8 +370,8 @@ public class SQLBuilderTest {
   }
 
   /**
-   * Tests {@link SQLBuilder#join(Join, String, String, String, String, Comparison)}
-   * to ensure that joins can be constructed properly.
+   * Tests {@link SQLBuilder#join(Join, String, String, Comparison...)} to ensure
+   * that joins can be constructed properly.
    */
   @Test public void testJoin() {
     SQLBuilder sqlBuilder = new SQLBuilder()
@@ -385,12 +385,47 @@ public class SQLBuilderTest {
           SQLBuilder.Join.INNER,
           "my_other_table",
           "b",
-          "a.xyzzy",
-          "b.yeet",
-          ComparisonOp.EQUAL_TO);
+          new Comparison(
+              "a.xyzzy",
+              "b.yeet",
+              ComparisonOp.EQUAL_TO));
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN my_other_table b ON a.xyzzy = b.yeet");
+  }
+
+  /**
+   * Tests {@link SQLBuilder#join(Join, String, String, Comparison...)} to ensure
+   * compound joins can be constructed properly.
+   */
+  @Test public void testJoin_multi() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+      .select(
+          "my_table",
+          "a.foo",
+          "a.bar",
+          "b.baz")
+      .tableAlias("a")
+      .join(
+          SQLBuilder.Join.INNER,
+          "my_other_table",
+          "b",
+          new Comparison(
+              "a.xyzzy",
+              "b.yeet",
+              ComparisonOp.EQUAL_TO),
+          new Comparison(
+              "a.yoink",
+              null,
+              ComparisonOp.IS_NULL)
+          .or(),
+          new Comparison(
+              "a.yoink",
+              "?",
+              ComparisonOp.LESS_THAN_OR_EQUAL_TO));
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN my_other_table b ON ( a.xyzzy = b.yeet AND a.yoink IS NULL OR a.yoink <= ? )");
   }
 
   /**
@@ -427,8 +462,8 @@ public class SQLBuilderTest {
   }
 
   /**
-   * Tests {@link SQLBuilder#join(Join, SQLBuilder, String, Object, Object, Comparison)}
-   * to ensure that complicated joins with subqueries can be built.
+   * Tests {@link SQLBuilder#join(Join, SQLBuilder, String, Comparison...)} to
+   * ensure that complicated joins with subqueries can be built.
    */
   @Test public void testJoinSubquery() {
     SQLBuilder sqlBuilder = new SQLBuilder()
@@ -442,9 +477,10 @@ public class SQLBuilderTest {
           SQLBuilder.Join.INNER,
           new SQLBuilder().select("inner", "i_alpha", "i_beta"),
           "b",
-          new SQLBuilder().select("left", "l_alpha", "l_beta"),
-          new SQLBuilder().select("right", "r_alpha", "r_beta"),
-          ComparisonOp.EQUAL_TO);
+          new Comparison(
+              new SQLBuilder().select("left", "l_alpha", "l_beta"),
+              new SQLBuilder().select("right", "r_alpha", "r_beta"),
+              ComparisonOp.EQUAL_TO));
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN ( SELECT i_alpha, i_beta FROM inner ) b ON ( SELECT l_alpha, l_beta FROM left ) = ( SELECT r_alpha, r_beta FROM right )");
