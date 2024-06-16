@@ -117,7 +117,12 @@ public class SQLBuilder {
     /**
      * Needle is in a collection.
      */
-    IN(" IN ? ");
+    IN(" IN ? "),
+
+    /**
+     * Needle is not in a collection.
+     */
+    NOT_IN(" NOT IN ?");
     
     private String op = null;
     
@@ -660,28 +665,32 @@ public class SQLBuilder {
   /**
    * Adds a specific column to WHERE clause.
    *
-   * Note that {@link Comparison#IN} is invalid here--use
-   * {@link SQLBuilder#whereIn(Object, int)} instead.
+   * Note that {@link Comparison#IN} and {@link Comparison#NOT_IN} are invalid
+   * here--use {@link SQLBuilder#whereIn(Object, int)} instead.
    * 
    * @param column the column
    * @param comparison the comparison operation
    * @return this SQLBuilder object
    */
   public SQLBuilder where(Object column, Comparison comparison) {
-    if(Comparison.IN == comparison)
-      throw new IllegalArgumentException("Comparison.IN is not valid for this method.");
+    if(Comparison.IN == comparison || Comparison.NOT_IN == comparison)
+      throw new IllegalArgumentException(
+          String.format(
+              "%1$s is not valid for this method.",
+              comparison.name()));
     filters.add(new SimpleEntry<>(column.toString(), comparison.getOp()));
     return this;
   }
 
   /**
-   * Adds an IN comparison to a WHERE clause.
+   * Adds an IN (or NOT IN) comparison to a WHERE clause.
    *
    * @param colum the name of the column
+   * @param not {@code true} for NOT IN, {@code false} for IN
    * @param count the number of items in the collection
    * @return this SQLBuilder object
    */
-  public SQLBuilder whereIn(Object column, int count) {
+  public SQLBuilder whereIn(Object column, boolean not, int count) {
     StringBuilder sb = new StringBuilder("(");
     for(int i = 0; i < count; i++) {
       if(0 < i) sb.append(", ");
@@ -691,7 +700,8 @@ public class SQLBuilder {
     filters.add(
         new SimpleEntry<>(
             column.toString(),
-            Comparison.IN.getOp().replace("?", sb.toString())));
+            (not ? Comparison.NOT_IN : Comparison.IN)
+                .getOp().replace("?", sb.toString())));
     return this;
   }
 

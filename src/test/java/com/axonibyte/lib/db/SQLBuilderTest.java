@@ -457,10 +457,23 @@ public class SQLBuilderTest {
   @Test public void testWhereIn() {
     SQLBuilder sqlBuilder = new SQLBuilder()
         .select("my_table", "foo", "bar")
-        .whereIn("baz", 3);
+        .whereIn("baz", false, 3);
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT foo, bar FROM my_table WHERE baz IN (?, ?, ?)");
+  }
+
+  /**
+   * Tests {@link SQLBuilder#whereIn(Object, int)} to make sure that WHERE IN
+   * clauses can be built.
+   */
+  @Test public void testWhereIn_not() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .select("my_table", "foo", "bar")
+        .whereIn("baz", true, 3);
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT foo, bar FROM my_table WHERE baz NOT IN (?, ?, ?)");
   }
 
   /**
