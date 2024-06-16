@@ -25,6 +25,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.Map.Entry;
 
+import com.axonibyte.lib.db.Comparison.ComparisonOp;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,85 +65,6 @@ public class SQLBuilder {
   }
   
   /**
-   * The operation to use when filtering values.
-   *
-   * @author Caleb L. Power <cpower@axonibyte.com>
-   */
-  public static enum Comparison {
-    
-    /**
-     * Substring searches.
-     */
-    LIKE(" LIKE ? "),
-    
-    /**
-     * Needle in a haystack.
-     */
-    EQUAL_TO(" = ? "),
-    
-    /**
-     * Get values less than the one provided.
-     */
-    LESS_THAN(" < ? "),
-    
-    /**
-     * Get values less than or equal to the one provided.
-     */
-    LESS_THAN_OR_EQUAL_TO(" <= ? "),
-    
-    /**
-     * Get values greater than the one provided.
-     */
-    GREATER_THAN(" > ? "),
-    
-    /**
-     * Get values greater than or equal to the one provided.
-     */
-    GREATER_THAN_OR_EQUAL_TO(" >= ? "),
-    
-    /**
-     * Get values other than the needle.
-     */
-    NOT_EQUAL_TO(" <> ? "),
-
-    /**
-     * Needle is null.
-     */
-    IS_NULL(" IS NULL "),
-
-    /**
-     * Needle is not null.
-     */
-    IS_NOT_NULL(" IS NOT NULL "),
-
-    /**
-     * Needle is in a collection.
-     */
-    IN(" IN ? "),
-
-    /**
-     * Needle is not in a collection.
-     */
-    NOT_IN(" NOT IN ?");
-    
-    private String op = null;
-    
-    private Comparison(String op) {
-      this.op = op;
-    }
-    
-    /**
-     * Retrieves the operation associated with this comparison.
-     * 
-     * @return the operation and parameter
-     */
-    String getOp() {
-      return op;
-    }
-    
-  }
-  
-  /**
    * Denotes some kind of table join.
    */
   public static enum Join {
@@ -175,7 +98,7 @@ public class SQLBuilder {
   private List<Entry<String, String>> filters = new ArrayList<>(); // filters for the WHERE clause
   private List<String> groupBy = new ArrayList<>(); // columns to group by
   // joins = [ { JOIN, { { TABLE, ALIAS }, { LEFT, { RIGHT, COMPARISON } } } }, ... ]
-  private List<Entry<Join, Entry<Entry<String, String>, Entry<String, Entry<String, Comparison>>>>> joins = new ArrayList<>();
+  private List<Entry<Join, Entry<Entry<String, String>, Entry<String, Entry<String, ComparisonOp>>>>> joins = new ArrayList<>();
   private Map<Integer, Boolean> conjunctions = new HashMap<>();
   private Map<String, Order> orderBy = new LinkedHashMap<>();
   private Statement statement = null;
@@ -563,7 +486,7 @@ public class SQLBuilder {
    * @param comparison the operation of comparison between left and right columns
    * @return this SQLBuilder object
    */
-  public SQLBuilder join(Join join, String table, String alias, Object left, Object right, Comparison comparison) {
+  public SQLBuilder join(Join join, String table, String alias, Object left, Object right, ComparisonOp op) {
     joins.add(
         new SimpleEntry<>(
             join,
@@ -581,7 +504,7 @@ public class SQLBuilder {
                                 "( %1$s )",
                                 right.toString())
                             : right.toString(),
-                        comparison)))));
+                        op)))));
     return this;
   }
 
@@ -596,7 +519,7 @@ public class SQLBuilder {
    * @param comparison the operation of comparison between left and right columns
    * @return this SQLBuilder object
    */
-  public SQLBuilder join(Join join, SQLBuilder subquery, String alias, Object left, Object right, Comparison comparison) {
+  public SQLBuilder join(Join join, SQLBuilder subquery, String alias, Object left, Object right, ComparisonOp op) {
     return join(
         join,
         String.format(
@@ -605,7 +528,7 @@ public class SQLBuilder {
         alias,
         left,
         right,
-        comparison);
+        op);
   }
   
   /**
@@ -637,7 +560,7 @@ public class SQLBuilder {
    * @return this SQLBuilder object
    */
   public SQLBuilder where(Object... columns) {
-    return where(Comparison.EQUAL_TO, columns);
+    return where(ComparisonOp.EQUAL_TO, columns);
   }
   
   /**
@@ -647,8 +570,8 @@ public class SQLBuilder {
    * @param columns the columns that shall act as filters
    * @return this SQLBuilder object
    */
-  public SQLBuilder where(Comparison comparison, Object... columns) {
-    for(var column : columns) where(column, comparison);
+  public SQLBuilder where(ComparisonOp op, Object... columns) {
+    for(var column : columns) where(column, op);
     return this;
   }
   
@@ -659,21 +582,21 @@ public class SQLBuilder {
    * @return this SQLBuilder object
    */
   public SQLBuilder where(Object column) {
-    return where(column, Comparison.EQUAL_TO);
+    return where(column, ComparisonOp.EQUAL_TO);
   }
   
   /**
    * Adds a specific column to WHERE clause.
    *
-   * Note that {@link Comparison#IN} and {@link Comparison#NOT_IN} are invalid
+   * Note that {@link ComparisonOp#IN} and {@link ComparisonOp#NOT_IN} are invalid
    * here--use {@link SQLBuilder#whereIn(Object, int)} instead.
    * 
    * @param column the column
    * @param comparison the comparison operation
    * @return this SQLBuilder object
    */
-  public SQLBuilder where(Object column, Comparison comparison) {
-    if(Comparison.IN == comparison || Comparison.NOT_IN == comparison)
+  public SQLBuilder where(Object column, ComparisonOp comparison) {
+    if(ComparisonOp.IN == comparison || ComparisonOp.NOT_IN == comparison)
       throw new IllegalArgumentException(
           String.format(
               "%1$s is not valid for this method.",
@@ -700,7 +623,7 @@ public class SQLBuilder {
     filters.add(
         new SimpleEntry<>(
             column.toString(),
-            (not ? Comparison.NOT_IN : Comparison.IN)
+            (not ? ComparisonOp.NOT_IN : ComparisonOp.IN)
                 .getOp().replace("?", sb.toString())));
     return this;
   }
@@ -709,15 +632,15 @@ public class SQLBuilder {
    * Adds a subquery to WHERE clause.
    *
    * @param column the column
-   * @param comparison the comparison operation
+   * @param op the comparison operation
    * @param subquery the subquery for comparison
    * @return this SQLBuilder object
    */
-  public SQLBuilder where(Object column, Comparison comparison, SQLBuilder subquery) {
+  public SQLBuilder where(Object column, ComparisonOp op, SQLBuilder subquery) {
     filters.add(
         new SimpleEntry<>(
             column.toString(),
-            comparison.getOp().replace(
+            op.getOp().replace(
                 "?",
                 String.format(
                     "( %1$s )",

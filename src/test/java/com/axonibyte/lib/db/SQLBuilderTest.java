@@ -17,7 +17,7 @@ package com.axonibyte.lib.db;
 
 import java.util.UUID;
 
-import com.axonibyte.lib.db.SQLBuilder.Comparison;
+import com.axonibyte.lib.db.Comparison.ComparisonOp;
 import com.axonibyte.lib.db.SQLBuilder.Order;
 
 import org.testng.Assert;
@@ -103,7 +103,7 @@ public class SQLBuilderTest {
   @Test public void testSelect_singleWhereLike() {
     SQLBuilder sqlBuilder = new SQLBuilder()
         .select("my_table", "column_foo")
-        .where("column_bar", Comparison.LIKE);
+        .where("column_bar", ComparisonOp.LIKE);
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT column_foo FROM my_table WHERE column_bar LIKE ?");
@@ -117,9 +117,9 @@ public class SQLBuilderTest {
   @Test public void testSelect_multipleWhereLike() {
     SQLBuilder sqlBuilder = new SQLBuilder()
         .select("my_table", "column_foo")
-        .where("column_bar", Comparison.LIKE)
-        .where("column_baz", Comparison.LIKE)
-        .where("column_qux", Comparison.LIKE);
+        .where("column_bar", ComparisonOp.LIKE)
+        .where("column_baz", ComparisonOp.LIKE)
+        .where("column_qux", ComparisonOp.LIKE);
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT column_foo FROM my_table WHERE column_bar LIKE ? AND column_baz LIKE ? AND column_qux LIKE ?");
@@ -161,9 +161,9 @@ public class SQLBuilderTest {
   @Test public void testSelect_whereMixed() {
     SQLBuilder sqlBuilder = new SQLBuilder()
         .select("my_table", "column_foo")
-        .where("column_bar", Comparison.EQUAL_TO)
-        .where("column_baz", Comparison.LIKE)
-        .where("column_qux", Comparison.EQUAL_TO);
+        .where("column_bar", ComparisonOp.EQUAL_TO)
+        .where("column_baz", ComparisonOp.LIKE)
+        .where("column_qux", ComparisonOp.EQUAL_TO);
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT column_foo FROM my_table WHERE column_bar = ? AND column_baz LIKE ? AND column_qux = ?");
@@ -343,7 +343,7 @@ public class SQLBuilderTest {
   @Test public void testDelete_whereClause() {
     SQLBuilder sqlBuilder = new SQLBuilder()
         .delete("my_table")
-        .where("column_foo", Comparison.EQUAL_TO);
+        .where("column_foo", ComparisonOp.EQUAL_TO);
     Assert.assertEquals(sqlBuilder.toString(), "DELETE FROM my_table WHERE column_foo = ?");
   }
 
@@ -387,7 +387,7 @@ public class SQLBuilderTest {
           "b",
           "a.xyzzy",
           "b.yeet",
-          Comparison.EQUAL_TO);
+          ComparisonOp.EQUAL_TO);
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN my_other_table b ON a.xyzzy = b.yeet");
@@ -444,7 +444,7 @@ public class SQLBuilderTest {
           "b",
           new SQLBuilder().select("left", "l_alpha", "l_beta"),
           new SQLBuilder().select("right", "r_alpha", "r_beta"),
-          Comparison.EQUAL_TO);
+          ComparisonOp.EQUAL_TO);
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN ( SELECT i_alpha, i_beta FROM inner ) b ON ( SELECT l_alpha, l_beta FROM left ) = ( SELECT r_alpha, r_beta FROM right )");
@@ -485,7 +485,7 @@ public class SQLBuilderTest {
         .select("my_table", "foo", "bar")
         .where(
             "baz",
-            Comparison.GREATER_THAN,
+            ComparisonOp.GREATER_THAN,
             new SQLBuilder().select("inner").max("yeet"));
     Assert.assertEquals(
         sqlBuilder.toString(),
