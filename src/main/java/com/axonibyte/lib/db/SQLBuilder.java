@@ -591,6 +591,29 @@ public class SQLBuilder {
   }
 
   /**
+   * Adds a WHERE clause that compares two columns.
+   *
+   * Note that {@link ComparisonOp#IN} and {@link ComparisonOp#NOT_IN} are not
+   * valid here.
+   *
+   * @param leftColumn the first column to compare
+   * @param rightColumn the second column to compare
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder where(Object leftColumn, ComparisonOp comparison, Object rightColumn) {
+    if(ComparisonOp.IN == comparison || ComparisonOp.NOT_IN == comparison)
+      throw new IllegalArgumentException(
+          String.format(
+              "%1$s is not valid for this method.",
+              comparison.name()));
+    filters.add(
+        new SimpleEntry<>(
+            leftColumn.toString(),
+            comparison.getOp().replace("?", rightColumn.toString())));
+    return this;
+  }
+
+  /**
    * Adds an IN (or NOT IN) comparison to a WHERE clause.
    *
    * @param colum the name of the column

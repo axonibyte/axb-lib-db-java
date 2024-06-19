@@ -187,6 +187,19 @@ public class SQLBuilderTest {
   }
 
   /**
+   * Tests {@link SQLBuilder#where(Object, ComparisonOp, Object)} to ensure that
+   * two columns can be directly compared in a WHERE clause.
+   */
+  @Test public void testWhere_twoColCompare() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .select("my_table", "column_foo")
+        .where("column_foo", ComparisonOp.GREATER_THAN_OR_EQUAL_TO, "column_bar");
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "SELECT column_foo FROM my_table WHERE column_foo >= column_bar");
+  }
+
+  /**
    * Tests {@link SQLBuilder#or()} to ensure that parantheses are
    * terminated at the end of a statement.
    */
@@ -376,22 +389,30 @@ public class SQLBuilderTest {
   @Test public void testJoin() {
     SQLBuilder sqlBuilder = new SQLBuilder()
       .select(
-          "my_table",
-          "a.foo",
-          "a.bar",
-          "b.baz")
-      .tableAlias("a")
+          "table_1",
+          "t1.foo",
+          "t2.bar",
+          "t3.baz")
+      .tableAlias("t1")
       .join(
           SQLBuilder.Join.INNER,
-          "my_other_table",
-          "b",
+          "table_2",
+          "t2",
           new Comparison(
-              "a.xyzzy",
-              "b.yeet",
-              ComparisonOp.EQUAL_TO));
+              "t1.xyzzy",
+              "t2.yeet",
+              ComparisonOp.EQUAL_TO))
+      .join(
+          SQLBuilder.Join.LEFT,
+          "table_3",
+          "t3",
+          new Comparison(
+              "t2.yeet",
+              "t3.yoink",
+              ComparisonOp.NOT_EQUAL_TO));
     Assert.assertEquals(
         sqlBuilder.toString(),
-        "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN my_other_table b ON a.xyzzy = b.yeet");
+        "SELECT t1.foo, t2.bar, t3.baz FROM table_1 t1 INNER JOIN table_2 t2 ON t1.xyzzy = t2.yeet LEFT JOIN table_3 t3 ON t2.yeet <> t3.yoink");
   }
 
   /**
@@ -400,29 +421,29 @@ public class SQLBuilderTest {
    */
   @Test public void testJoin_multi() {
     SQLBuilder sqlBuilder = new SQLBuilder()
-      .select(
-          "my_table",
-          "a.foo",
-          "a.bar",
-          "b.baz")
-      .tableAlias("a")
-      .join(
-          SQLBuilder.Join.INNER,
-          "my_other_table",
-          "b",
-          new Comparison(
-              "a.xyzzy",
-              "b.yeet",
-              ComparisonOp.EQUAL_TO),
-          new Comparison(
-              "a.yoink",
-              null,
-              ComparisonOp.IS_NULL)
-          .or(),
-          new Comparison(
-              "a.yoink",
-              "?",
-              ComparisonOp.LESS_THAN_OR_EQUAL_TO));
+        .select(
+            "my_table",
+            "a.foo",
+            "a.bar",
+            "b.baz")
+        .tableAlias("a")
+        .join(
+            SQLBuilder.Join.INNER,
+            "my_other_table",
+            "b",
+            new Comparison(
+                "a.xyzzy",
+                "b.yeet",
+                ComparisonOp.EQUAL_TO),
+            new Comparison(
+                "a.yoink",
+                null,
+                ComparisonOp.IS_NULL)
+                .or(),
+            new Comparison(
+                "a.yoink",
+                "?",
+                ComparisonOp.LESS_THAN_OR_EQUAL_TO));
     Assert.assertEquals(
         sqlBuilder.toString(),
         "SELECT a.foo, a.bar, b.baz FROM my_table a INNER JOIN my_other_table b ON ( a.xyzzy = b.yeet AND a.yoink IS NULL OR a.yoink <= ? )");
