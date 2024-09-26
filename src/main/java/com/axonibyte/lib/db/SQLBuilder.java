@@ -41,6 +41,7 @@ public class SQLBuilder {
   
   private static enum Statement {
     INSERT, // create
+    INSERT_IGNORE, // create (but ignore errors)
     SELECT, // read
     UPDATE, // update
     DELETE, // delete
@@ -213,6 +214,31 @@ public class SQLBuilder {
    */
   public SQLBuilder insert(String table) {
     this.statement = Statement.INSERT;
+    this.table = new SimpleEntry<>(table, null);
+    return this;
+  }
+  
+  /**
+   * Begins INSERT IGNORE statement with multiple columns.
+   * 
+   * @param table the table in which rows will be inserted
+   * @param columns the columns to be inserted
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder insertIgnore(String table, Object... columns) {
+    insertIgnore(table);
+    for(var column : columns) column(column);
+    return this;
+  }
+  
+  /**
+   * Begins INSERT IGNORE statement.
+   * 
+   * @param table the table in which rows will be inserted
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder insertIgnore(String table) {
+    this.statement = Statement.INSERT_IGNORE;
     this.table = new SimpleEntry<>(table, null);
     return this;
   }
@@ -712,10 +738,14 @@ public class SQLBuilder {
     StringBuilder stringBuilder = new StringBuilder();
     
     switch(statement) {
+    case INSERT_IGNORE: // if this is an INSERT IGNORE statement
+      stringBuilder.append("IGNORE ");
+      // fall through, execute the rest of the build case for INSERT
+      
     case INSERT: // if this is an INSERT statement
       
-      // add table, columns
-      stringBuilder.append("INSERT INTO ").append(table.getKey()).append(" (");
+      // add table, columns; put INSERT at begining just in case IGNORE is specified
+      stringBuilder.insert(0, "INSERT ").append("INTO ").append(table.getKey()).append(" (");
       for(int i = 0; i < columns.size(); i++) {
         stringBuilder.append(columns.get(i));
         if(i < columns.size() - 1) stringBuilder.append(", ");

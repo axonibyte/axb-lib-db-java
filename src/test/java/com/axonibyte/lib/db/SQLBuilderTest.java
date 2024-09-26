@@ -340,6 +340,28 @@ public class SQLBuilderTest {
   }
 
   /**
+   * Tests {@link SQLBuilder#insertIgnore(String, Object...)} to ensure
+   * that an INSERT IGNORE statement with a single column can be generated.
+   */
+  @Test public void testInsertIgnore_singleColumn() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .insertIgnore("my_table", "column_foo");
+    Assert.assertEquals(sqlBuilder.toString(), "INSERT IGNORE INTO my_table (column_foo) VALUES (?)");
+  }
+  
+  /**
+   * Tests {@link SQLBuilder#insertIgnore(String, Object...)} to ensure
+   * that an INSERT IGNORE statement with multiple columns can be generated.
+   */
+  @Test public void testInsertIgnore_multipleColumns() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+        .insertIgnore("my_table", "column_foo", "column_bar", "column_baz");
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "INSERT IGNORE INTO my_table (column_foo, column_bar, column_baz) VALUES (?, ?, ?)");
+  }
+
+  /**
    * Tests {@link SQLBuilder#delete(String)} to ensure that
    * a DELETE statement can be generated.
    */
