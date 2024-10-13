@@ -128,7 +128,7 @@ public class Database {
    * @throws SQLException if a database error occurs
    */
   public Connection connect() throws SQLException {
-    logger.info("Obtaining database connection.");
+    logger.debug("Obtaining database connection.");
     return hikariDataSource.getConnection();
   }
   
@@ -160,21 +160,21 @@ public class Database {
   public void close(Connection con, PreparedStatement stmt, ResultSet res) {
     try {
       if(null != res) {
-        logger.info("Closing result set.");
+        logger.debug("Closing result set.");
         res.close();
       }
     } catch(SQLException e) { }
     
     try {
       if(null != stmt) {
-        logger.info("Closing statement.");
+        logger.debug("Closing statement.");
         stmt.close();
       }
     } catch(SQLException e) { }
     
     try {
       if(null != con) {
-        logger.info("Closing connection.");
+        logger.debug("Closing connection.");
         con.close();
       }
     } catch(SQLException e) { }
