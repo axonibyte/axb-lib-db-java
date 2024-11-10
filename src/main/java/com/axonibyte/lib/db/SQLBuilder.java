@@ -19,10 +19,12 @@ import java.nio.ByteBuffer;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.Map.Entry;
 
@@ -104,6 +106,7 @@ public class SQLBuilder {
   // joins = [ { JOIN, { { TABLE, ALIAS }, [ COMPARISON... ] } } ]
   private List<Entry<Join, Entry<Entry<String, String>, List<Comparison>>>> joins = new ArrayList<>();
   private Map<Integer, Boolean> conjunctions = new HashMap<>();
+  private Map<Integer, Wrapper> wrappers = new TreeMap<>(Comparator.reverseOrder());
   private Map<String, Order> orderBy = new LinkedHashMap<>();
   private Statement statement = null;
 
@@ -728,6 +731,18 @@ public class SQLBuilder {
     this.offset = offset;
     return this;
   }
+
+  /**
+   * Wraps an argument in a function of variable order.
+   *
+   * @param wrappers one or more {@link Wrapper} objects
+   * @return this SQLBuilder object
+   */
+  public SQLBuilder wrap(Wrapper... wrappers) {
+    for(var wrapper : wrappers)
+      this.wrappers.put(wrapper.getPosition(), wrapper);
+    return this;
+  }
   
   /**
    * Builds the query.
@@ -906,17 +921,11 @@ public class SQLBuilder {
     }
     
     // trim whitespace just in case
-    return stringBuilder.toString().trim();
-  }
-  
-  /**
-   * Clears out query specifications for object reuse
-   */
-  public void clear() {
-    columns.clear();
-    filters.clear();
-    statement = null;
-    table = null;
+    String statement = stringBuilder.toString().trim();
+    for(var wrapper : wrappers.values())
+      statement = replaceNth(statement, "?", wrapper.toString(), wrapper.getPosition());
+
+    return statement;
   }
   
   /**
@@ -958,6 +967,21 @@ public class SQLBuilder {
     if(null == bytes) return null;
     ByteBuffer byteBuf = ByteBuffer.wrap(bytes);
     return new UUID(byteBuf.getLong(), byteBuf.getLong());
+  }
+
+  private String replaceNth(String haystack, String needle, String fae, int witch) {
+    int idx = -1;
+    int cnt = 0;
+    int beg = 0;
+
+    while(-1 != (idx = haystack.indexOf(needle, beg))) {
+      cnt++;
+      if(witch == cnt)
+        return haystack.substring(0, idx) + fae + haystack.substring(idx + needle.length());
+      beg = idx + needle.length();
+    }
+
+    return haystack;
   }
   
 }

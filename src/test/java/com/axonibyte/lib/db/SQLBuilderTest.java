@@ -572,6 +572,24 @@ public class SQLBuilderTest {
   }
 
   /**
+   * Tests {@link SQLBuilder#wrap(Wrapper)} to ensure that argument placeholders
+   * can be properly wrapped.
+   */
+  @Test public void testWrapper() {
+    SQLBuilder sqlBuilder = new SQLBuilder()
+      .update("my_table", "foo", "bar", "baz", "alpha", "beta")
+      .where("bux")
+      .order("xyzzy", Order.ASC)
+      .wrap(
+          new Wrapper(1, "ONE", 1),
+          new Wrapper(6, "SIX", 2),
+          new Wrapper(3, "THREE"));
+    Assert.assertEquals(
+        sqlBuilder.toString(),
+        "UPDATE my_table SET foo = ONE(?), bar = ?, baz = THREE(?), alpha = ?, beta = ? WHERE bux = SIX(?, ?) ORDER BY xyzzy ASC");
+  }
+
+  /**
    * Tests {@link SQLBuilder#testUUIDToBytes(UUID)} to ensure that,
    * given a valid UUID, a byte array will be returned with an underlying
    * datum matching that of the UUID.
