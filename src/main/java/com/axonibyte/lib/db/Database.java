@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021-2023 Axonibyte Innovations, LLC. All rights reserved.
+ * Copyright (c) 2021-2026 Axonibyte Innovations, LLC. All rights reserved.
  *
  *   Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package com.axonibyte.lib.db;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -25,7 +26,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -271,6 +274,111 @@ public class Database {
 
   }
   
+
+  /**
+   * Splits a SQL script into the individual statements it contains.
+   *
+   * <p>Semicolons only terminate a statement when they are actually code:
+   * those inside string literals, quoted identifiers, or comments are part of
+   * the text around them. A naive {@code split(";")} corrupts any script
+   * containing so much as a semicolon in a default value.
+   *
+   * <p>Comments are preserved rather than stripped. They are legal SQL, the
+   * server ignores them, and removing them would mean re-solving the same
+   * quoting problem a second time for no benefit.
+   *
+   * @param script the full text of a bootstrap script
+   * @return the statements it contains, in order, with blank ones omitted
+   */
+  static List<String> splitStatements(String script) {
+    List<String> statements = new ArrayList<>();
+    if(null == script) return statements;
+
+    StringBuilder current = new StringBuilder();
+    int len = script.length();
+
+    for(int i = 0; i < len; i++) {
+      char c = script.charAt(i);
+      char next = i + 1 < len ? script.charAt(i + 1) : '\0';
+
+      // Line comments run to the end of the line -- which is exactly why the
+      // reader must preserve newlines. Joining lines with a space, as this
+      // once did, let a `--` header comment silently swallow the entire rest
+      // of the file: the statement then executed as a no-op with no error.
+      if(('-' == c && '-' == next) || '#' == c) {
+        while(i < len && '\n' != script.charAt(i)) current.append(script.charAt(i++));
+        if(i < len) current.append('\n');
+        continue;
+      }
+
+      if('/' == c && '*' == next) {
+        current.append(c).append(next);
+        i += 2;
+        while(i < len && !('*' == script.charAt(i) && i + 1 < len && '/' == script.charAt(i + 1)))
+          current.append(script.charAt(i++));
+        if(i + 1 < len) {
+          current.append("*/");
+          i++;
+        }
+        continue;
+      }
+
+      if('\'' == c || '"' == c || '`' == c) {
+        current.append(c);
+        i++;
+        while(i < len) {
+          char q = script.charAt(i);
+          // A backslash escape, or a doubled quote -- both mean the literal
+          // continues past what looks like its terminator.
+          if('\\' == q && i + 1 < len) {
+            current.append(q).append(script.charAt(i + 1));
+            i += 2;
+            continue;
+          }
+          if(c == q && i + 1 < len && c == script.charAt(i + 1)) {
+            current.append(q).append(q);
+            i += 2;
+            continue;
+          }
+          current.append(q);
+          if(c == q) break;
+          i++;
+        }
+        continue;
+      }
+
+      if(';' == c) {
+        add(statements, current);
+        current.setLength(0);
+        continue;
+      }
+
+      current.append(c);
+    }
+
+    add(statements, current);
+    return statements;
+  }
+
+  /** Adds a statement if it holds anything the server would act on. */
+  private static void add(List<String> statements, StringBuilder candidate) {
+    String trimmed = candidate.toString().trim();
+    if(trimmed.isEmpty()) return;
+
+    // A fragment that is only comments and whitespace is not a statement, and
+    // preparing it is a syntax error. This is what makes a trailing semicolon,
+    // or a file that is entirely a licence header, harmless.
+    if(stripComments(trimmed).isBlank()) return;
+    statements.add(trimmed);
+  }
+
+  /** The statement with its comments removed, for emptiness checks only. */
+  private static String stripComments(String statement) {
+    return statement
+        .replaceAll("(?s)/\\*.*?\\*/", " ")
+        .replaceAll("(?m)(--|#).*$", " ");
+  }
+
   /**
    * Sets up the database, adding in tables and otherwise running through
    * predetermined scripts.
@@ -307,22 +415,51 @@ public class Database {
         String resource = null;
         logger.info("Reading database bootstrap script {}", file);
         
-        try(
-            BufferedReader reader = new BufferedReader(
-                new InputStreamReader(
-                    getClass().getClassLoader().getResourceAsStream(file),
-                    StandardCharsets.UTF_8))) {
+        InputStream in = getClass().getClassLoader().getResourceAsStream(file);
+        if(null == in) {
+          // Listed in the archive but not resolvable by the classloader. Better
+          // to say so than to skip it silently -- a bootstrap script that never
+          // ran is invisible until the schema it creates is missing.
+          logger.error("Bootstrap script {} could not be opened; skipping.", file);
+          continue;
+        }
+
+        try(BufferedReader reader = new BufferedReader(
+            new InputStreamReader(in, StandardCharsets.UTF_8))) {
           StringBuilder resBuilder = new StringBuilder();
-          for(
-              String line;
-              null != (line = reader.readLine());
-              resBuilder.append(line.trim()).append(' '));
-          resource = resBuilder.deleteCharAt(resBuilder.length() - 1).toString();
-          stmt = con.prepareStatement(
-              resource.replace("${database}", dbName).replace("${prefix}", dbPrefix));
-          stmt.execute();
-        } finally {
-          close(null, stmt, null);
+          for(String line; null != (line = reader.readLine());)
+            resBuilder.append(line).append('\n');
+          resource = resBuilder.toString();
+        }
+
+        List<String> statements = splitStatements(
+            resource.replace("${database}", dbName).replace("${prefix}", dbPrefix));
+        if(1 < statements.size())
+          logger.debug("Script {} contains {} statements.", file, statements.size());
+
+        for(int i = 0; i < statements.size(); i++) {
+          stmt = null;
+          try {
+            stmt = con.prepareStatement(statements.get(i));
+            stmt.execute();
+          } catch(SQLException e) {
+            // Name the script and the statement within it. Without this a
+            // failure part-way through a multi-statement file reports only the
+            // syntax error, leaving the reader to work out which file -- and
+            // which part of it -- the server was talking about.
+            throw new SQLException(
+                String.format(
+                    "Bootstrap script %1$s failed at statement %2$d of %3$d: %4$s",
+                    file,
+                    i + 1,
+                    statements.size(),
+                    e.getMessage()),
+                e.getSQLState(),
+                e.getErrorCode(),
+                e);
+          } finally {
+            close(null, stmt, null);
+          }
         }
       }
     } catch(IOException e) {

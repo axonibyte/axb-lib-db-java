@@ -6,6 +6,7 @@
     <classes>
       <class name="com.axonibyte.lib.db.SQLBuilderTest" />
       <class name="com.axonibyte.lib.db.SQLBuilderConjunctionTest" />
+      <class name="com.axonibyte.lib.db.DatabaseScriptTest" />
     </classes>
   </test>
 </suite>
