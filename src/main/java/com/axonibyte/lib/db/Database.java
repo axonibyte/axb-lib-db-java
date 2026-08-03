@@ -158,26 +158,117 @@ public class Database {
    * @param res a {@link ResultSet} to close, or {@code null} to skip resultset closure
    */
   public void close(Connection con, PreparedStatement stmt, ResultSet res) {
+    // Failures here are logged rather than thrown, because close() is called from
+    // finally blocks where throwing would mask the original exception. They were
+    // previously swallowed entirely, which hid connection-return and commit failures
+    // completely -- including, with autocommit disabled, silently discarded work.
     try {
       if(null != res) {
         logger.debug("Closing result set.");
         res.close();
       }
-    } catch(SQLException e) { }
-    
+    } catch(SQLException e) {
+      logger.warn("Failed to close result set: {}", describe(e));
+    }
+
     try {
       if(null != stmt) {
         logger.debug("Closing statement.");
         stmt.close();
       }
-    } catch(SQLException e) { }
-    
+    } catch(SQLException e) {
+      logger.warn("Failed to close statement: {}", describe(e));
+    }
+
     try {
       if(null != con) {
         logger.debug("Closing connection.");
         con.close();
       }
-    } catch(SQLException e) { }
+    } catch(SQLException e) {
+      logger.warn("Failed to return connection to the pool: {}", describe(e));
+    }
+  }
+
+  private static String describe(Exception e) {
+    return null == e.getMessage() ? e.getClass().getSimpleName() : e.getMessage();
+  }
+
+  /**
+   * Runs a unit of work inside a single database transaction, committing on success
+   * and rolling back on any failure.
+   *
+   * <p>Connections come from the pool with autocommit enabled, so a sequence of
+   * statements issued through {@link #connect()} is not atomic: a failure partway
+   * through leaves the earlier statements committed. Anything that writes more than
+   * one row across more than one statement -- an invoice and its line items, an
+   * organization and its first member, a message and its recipients -- should run
+   * through here instead.</p>
+   *
+   * <p>Autocommit is restored before the connection is returned to the pool.</p>
+   *
+   * @param <T> the type produced by the unit of work
+   * @param work the work to perform, receiving a {@link Connection} in a transaction
+   * @return whatever the unit of work returned
+   * @throws SQLException if the work failed, if the commit failed, or if a connection
+   *         could not be obtained; the transaction is rolled back in every such case
+   */
+  public <T> T transaction(TransactionalWork<T> work) throws SQLException {
+    Connection con = null;
+    boolean priorAutoCommit = true;
+
+    try {
+      con = connect();
+      priorAutoCommit = con.getAutoCommit();
+      con.setAutoCommit(false);
+
+      T result = work.execute(con);
+
+      con.commit();
+      return result;
+
+    } catch(SQLException | RuntimeException e) {
+      if(null != con) {
+        try {
+          logger.warn("Rolling back transaction: {}", describe(e));
+          con.rollback();
+        } catch(SQLException rollbackFailure) {
+          logger.error("Rollback itself failed: {}", describe(rollbackFailure));
+          e.addSuppressed(rollbackFailure);
+        }
+      }
+      if(e instanceof SQLException) throw (SQLException)e;
+      throw (RuntimeException)e;
+
+    } finally {
+      if(null != con) {
+        try {
+          con.setAutoCommit(priorAutoCommit);
+        } catch(SQLException e) {
+          logger.warn("Failed to restore autocommit: {}", describe(e));
+        }
+        close(con, null, null);
+      }
+    }
+  }
+
+  /**
+   * A unit of work to be executed inside a transaction.
+   *
+   * @param <T> the type produced by the unit of work
+   */
+  @FunctionalInterface public interface TransactionalWork<T> {
+
+    /**
+     * Performs the work. The connection is in a transaction; do not commit, roll
+     * back, or close it.
+     *
+     * @param con the transactional {@link Connection}
+     * @return the result of the work
+     * @throws SQLException if the work fails, causing a rollback
+     */
+    public T execute(Connection con) throws SQLException;
+
   }
   
   /**

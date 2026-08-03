@@ -562,6 +562,25 @@ public class SQLBuilder {
    *
    * @return this SQLBuilder object
    */
+  /**
+   * Joins subsequent filters with {@code OR}.
+   *
+   * <p><strong>This is retroactive by exactly one filter.</strong> The OR group opens
+   * at the filter <em>immediately preceding</em> the call, not at the next one. So:</p>
+   *
+   * <pre>
+   *   .where("a").where("b").or().where("c")   // a = ? AND (b = ? OR c = ?)
+   *   .where("a").or().where("b").where("c")   // (a = ? OR b = ? OR c = ?)
+   * </pre>
+   *
+   * <p>The second form is the trap: written expecting {@code a AND (b OR c)}, it
+   * instead pulls {@code a} into the OR group. Where {@code a} is an ownership or
+   * tenancy predicate, that widens the result set to rows the caller should not see.
+   * To scope a filter and then OR a set of alternatives, place the scoping filters
+   * first and call {@code or()} immediately before the final alternative.</p>
+   *
+   * @return this {@link SQLBuilder}
+   */
   public SQLBuilder or() {
     conjunctions.put(filters.size(), true);
     return this;
@@ -876,17 +895,41 @@ public class SQLBuilder {
     if(filters.size() > 0) {
       stringBuilder.append("WHERE ");
       boolean useOr = false;
+      // Tracks whether an opening parenthesis is actually outstanding. Without this, a
+      // closing parenthesis was emitted whenever the final filter was inside an OR run,
+      // even when no opening parenthesis had ever been written -- which happens when
+      // or() is called before any where(), and produced syntactically invalid SQL.
+      boolean groupOpen = false;
+
       for(int i = 0; i < filters.size(); i++) {
         if(conjunctions.containsKey(i)) useOr = conjunctions.get(i);
         if(i > 0) stringBuilder.append(useOr ? "OR " : "AND ");
-        if(conjunctions.containsKey(i + 1) && conjunctions.get(i + 1))
+
+        // Open a group only when the marker refers to a filter that actually exists and
+        // no group is already open. A trailing or() with no following where() leaves a
+        // marker one past the end, which otherwise opened a group that never closed.
+        if(!groupOpen
+            && i + 1 < filters.size()
+            && conjunctions.containsKey(i + 1)
+            && conjunctions.get(i + 1)) {
           stringBuilder.append("(");
+          groupOpen = true;
+        }
+
         stringBuilder.append(filters.get(i).getKey());
         stringBuilder.append(filters.get(i).getValue());
-        if(conjunctions.containsKey(i + 1) && !conjunctions.get(i + 1)
-            || useOr && filters.size() - 1 == i)
+
+        if(groupOpen
+            && (conjunctions.containsKey(i + 1) && !conjunctions.get(i + 1)
+                || useOr && filters.size() - 1 == i)) {
           stringBuilder.insert(stringBuilder.length() - 1, ")");
+          groupOpen = false;
+        }
       }
+
+      // Defensive: close any group still outstanding at the end of the clause.
+      if(groupOpen)
+        stringBuilder.insert(stringBuilder.length() - 1, ")");
     }
 
     // append GROUP BY clause if groups are specified
