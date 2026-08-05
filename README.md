@@ -8,6 +8,30 @@ with SQL databases, none of them are very intuitive when it comes to working
 with the queries themselves. Libraries that assist in SQL building are often not
 free. This library takes care of both use cases.
 
+## Lifecycle
+
+`Database` owns a connection pool, so it is itself a resource. Close it when the
+application shuts down, or hold it in a try-with-resources block:
+
+```java
+try(Database db = new Database(location, prefix, user, pass, ssl)) {
+  db.setup(App.class, "db");
+  ...
+}
+```
+
+Two different operations share the name `close`, and the distinction matters:
+
+- `close(Connection, PreparedStatement, ResultSet)` returns **one connection** to
+  the pool. This is what a `finally` block calls after a query, and it tolerates
+  nulls.
+- `close()` shuts **the pool itself** down. It is idempotent, throws no checked
+  exception, and afterwards `connect()` fails rather than handing back a
+  connection that cannot work. `isClosed()` reports which state it is in.
+
+Note that the constructors fail fast: they open a connection while building, so
+an unreachable database is reported at construction rather than at first query.
+
 ## Bootstrap scripts
 
 `Database.setup(Class<?>, String)` runs every `*.sql` resource under the given

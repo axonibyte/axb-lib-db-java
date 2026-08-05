@@ -44,9 +44,25 @@ import org.slf4j.LoggerFactory;
 /**
  * Handles interactions with the database.
  *
+ * <p>Owns a connection pool, and is therefore itself a resource. Call
+ * {@link #close()} when the application is shutting down, or hold it in a
+ * try-with-resources block:
+ *
+ * <pre>
+ *   try(Database db = new Database(location, prefix, user, pass, ssl)) {
+ *     db.setup(App.class, "db");
+ *     ...
+ *   }
+ * </pre>
+ *
+ * <p>Note that {@link #close(Connection, PreparedStatement, ResultSet)} is a
+ * different operation entirely: it returns one connection to the pool, and is
+ * what a {@code finally} block calls after a query. {@link #close()} shuts the
+ * pool itself down.
+ *
  * @author Caleb L. Power <cpower@axonibyte.com>
  */
-public class Database {
+public class Database implements AutoCloseable {
 
   private static final Logger logger = LoggerFactory.getLogger(Database.class);
   
@@ -116,7 +132,7 @@ public class Database {
     this.hikariConfig.setPassword(password);
     for(var property : properties.entrySet()) {
       logger.info(
-          "Adding Hikiri data source property {}={}",
+          "Adding Hikari data source property {}={}",
           property.getKey(),
           property.getValue());
       this.hikariConfig.addDataSourceProperty(property.getKey(), property.getValue());
@@ -124,6 +140,29 @@ public class Database {
     this.hikariDataSource = new HikariDataSource(hikariConfig);
   }
   
+  /**
+   * Wraps an already-configured pool.
+   *
+   * <p>Package-private, and present so that the pool's own lifecycle can be
+   * tested without a database behind it. Hikari fails fast: the public
+   * constructors dial out while they build, so they cannot produce an instance
+   * unless a server is actually listening — which makes {@code close()},
+   * {@code isClosed()} and try-with-resources untestable through them.
+   *
+   * <p>Not public, and not a supported way to build one of these. It performs
+   * none of the URL, credential or property handling the public constructors
+   * do.
+   *
+   * @param hikariDataSource the pool to wrap
+   * @param dbName the database name
+   * @param dbPrefix the global table prefix
+   */
+  Database(HikariDataSource hikariDataSource, String dbName, String dbPrefix) {
+    this.hikariDataSource = hikariDataSource;
+    this.dbName = dbName;
+    this.dbPrefix = dbPrefix;
+  }
+
   /**
    * Retrieves a {@link Connection} to the database.
    *
@@ -195,6 +234,37 @@ public class Database {
 
   private static String describe(Exception e) {
     return null == e.getMessage() ? e.getClass().getSimpleName() : e.getMessage();
+  }
+
+  /**
+   * Shuts the connection pool down, closing every connection it holds.
+   *
+   * <p>There was previously no way to do this from outside the class: the
+   * {@link HikariDataSource} is private and the only public {@code close} took
+   * a connection, a statement and a result set. An application could return
+   * connections to the pool but never dispose of the pool itself, so its
+   * housekeeping thread and idle connections outlived any attempt at an orderly
+   * shutdown. Harmless when the process is exiting anyway; not harmless for a
+   * test that builds several, an application that reconfigures at runtime, or
+   * anything embedding this in a longer-lived host.
+   *
+   * <p>Idempotent, and safe to call from a shutdown hook. Once closed,
+   * {@link #connect()} fails: the pool is gone, and pretending otherwise would
+   * hand out connections that cannot work.
+   */
+  @Override public void close() {
+    if(null == hikariDataSource || hikariDataSource.isClosed()) return;
+    logger.info("Closing connection pool.");
+    hikariDataSource.close();
+  }
+
+  /**
+   * Determines whether the connection pool has been shut down.
+   *
+   * @return {@code true} if {@link #close()} has already run
+   */
+  public boolean isClosed() {
+    return null == hikariDataSource || hikariDataSource.isClosed();
   }
 
   /**
@@ -383,14 +453,19 @@ public class Database {
    * Sets up the database, adding in tables and otherwise running through
    * predetermined scripts.
    *
-   * @param clazz the class associated with resources to retrieve
-   * @throws SQLException if there's a database malfunction
+   * <p>Nothing is tracked between runs: every script is executed on every call.
+   * Scripts must therefore be idempotent -- {@code IF NOT EXISTS} throughout,
+   * and {@code DROP} only in its {@code IF EXISTS} form.
+   *
+   * @param clazz the class whose protection domain holds the scripts
+   * @param parent the directory within that archive to read scripts from
+   * @throws SQLException if there's a database malfunction, or if a script
+   *         could not be read
    */
   public void setup(Class<?> clazz, String parent) throws SQLException {
-    Connection con = connect();
     PreparedStatement stmt = null;
     Set<String> fileList = new TreeSet<>();
-    
+
     CodeSource src = clazz.getProtectionDomain().getCodeSource();
     if(null != src) {
       URL jar = src.getLocation();
@@ -405,10 +480,18 @@ public class Database {
           }
         }
       } catch(IOException e) {
-        logger.error("Failed to read jar.");
-        e.printStackTrace();
+        // To slf4j, with the throwable, rather than to stderr. printStackTrace
+        // bypassed the log entirely, so the one record of why no migration ran
+        // went somewhere nobody was reading.
+        logger.error("Failed to enumerate bootstrap scripts: {}", describe(e), e);
       }
     } else logger.error("Could not retrieve class protection domain!");
+
+    // Opened once there is something to run, rather than before the archive is
+    // scanned. It used to be taken first and held for the whole scan, and any
+    // unchecked failure in there leaked it outright -- the finally that returns
+    // it guards only the loop below.
+    Connection con = connect();
 
     try {
       for(var file : fileList) {
@@ -430,6 +513,16 @@ public class Database {
           for(String line; null != (line = reader.readLine());)
             resBuilder.append(line).append('\n');
           resource = resBuilder.toString();
+        } catch(IOException e) {
+          // Named, and with the cause attached. This was caught by a handler
+          // wrapping the whole loop that threw away both -- "Database bootstrap
+          // scripts could not be read", with no indication of which one or why.
+          throw new SQLException(
+              String.format(
+                  "Bootstrap script %1$s could not be read: %2$s",
+                  file,
+                  describe(e)),
+              e);
         }
 
         List<String> statements = splitStatements(
@@ -462,11 +555,6 @@ public class Database {
           }
         }
       }
-    } catch(IOException e) {
-      throw new SQLException(
-          "Database bootstrap scripts could not be read.");
-    } catch(SQLException e) {
-      throw e;
     } finally {
       close(con, null, null);
     }
