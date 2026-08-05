@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.BiConsumer;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -96,7 +97,14 @@ public class Database implements AutoCloseable {
       put("connectionTimeout", "30000");
       put("maxLifetime", "180000");
       put("idleTimeout", "30000");
-      put("leakDetectionThreshold", "5000");
+      // Raised from 5000. Until now none of the four settings above reached the
+      // pool at all -- they were passed as driver properties, which silently
+      // ignore them -- so this value has never actually been in force and there
+      // is no established behaviour to preserve. Five seconds is too eager for
+      // a library whose own setup() legitimately holds one connection for the
+      // length of a migration run: it would report a leak, with a stack trace,
+      // on every boot of a project with more than a handful of scripts.
+      put("leakDetectionThreshold", "60000");
     }});
   }
   
@@ -131,6 +139,36 @@ public class Database implements AutoCloseable {
     this.hikariConfig.setUsername(username);
     this.hikariConfig.setPassword(password);
     for(var property : properties.entrySet()) {
+      var setting = POOL_SETTINGS.get(property.getKey());
+
+      // Pool settings and driver properties are different things that arrive
+      // through the same map, and telling them apart is the whole point of this
+      // branch. Everything used to go to addDataSourceProperty, which hands the
+      // value to the JDBC driver -- so a pool setting sent that way was accepted
+      // without complaint and then silently ignored. The shipped defaults below
+      // named four of them, so this class has spent its whole life claiming a
+      // connection timeout, a maximum lifetime, an idle timeout and a leak
+      // detection threshold while running on Hikari's defaults for all four.
+      if(null != setting) {
+        logger.info(
+            "Setting Hikari pool property {}={}",
+            property.getKey(),
+            property.getValue());
+        try {
+          setting.accept(this.hikariConfig, property.getValue());
+        } catch(IllegalArgumentException e) {
+          // Refused rather than ignored. A misconfigured pool setting that is
+          // quietly dropped is exactly the failure this change exists to end.
+          throw new SQLException(
+              String.format(
+                  "Pool property %1$s cannot take the value \"%2$s\"",
+                  property.getKey(),
+                  property.getValue()),
+              e);
+        }
+        continue;
+      }
+
       logger.info(
           "Adding Hikari data source property {}={}",
           property.getKey(),
@@ -139,30 +177,36 @@ public class Database implements AutoCloseable {
     }
     this.hikariDataSource = new HikariDataSource(hikariConfig);
   }
-  
-  /**
-   * Wraps an already-configured pool.
-   *
-   * <p>Package-private, and present so that the pool's own lifecycle can be
-   * tested without a database behind it. Hikari fails fast: the public
-   * constructors dial out while they build, so they cannot produce an instance
-   * unless a server is actually listening — which makes {@code close()},
-   * {@code isClosed()} and try-with-resources untestable through them.
-   *
-   * <p>Not public, and not a supported way to build one of these. It performs
-   * none of the URL, credential or property handling the public constructors
-   * do.
-   *
-   * @param hikariDataSource the pool to wrap
-   * @param dbName the database name
-   * @param dbPrefix the global table prefix
-   */
-  Database(HikariDataSource hikariDataSource, String dbName, String dbPrefix) {
-    this.hikariDataSource = hikariDataSource;
-    this.dbName = dbName;
-    this.dbPrefix = dbPrefix;
-  }
 
+  /**
+   * The properties that configure the pool rather than the driver.
+   *
+   * <p>Anything not named here is passed through to the JDBC driver as a data
+   * source property, which is what every entry used to be. Hikari's own naming
+   * is used verbatim, so a caller can look a setting up in Hikari's
+   * documentation and expect it to work.
+   */
+  private static final Map<String, BiConsumer<HikariConfig, String>> POOL_SETTINGS =
+      Map.ofEntries(
+          Map.entry("connectionTimeout", (c, v) -> c.setConnectionTimeout(Long.parseLong(v))),
+          Map.entry("idleTimeout", (c, v) -> c.setIdleTimeout(Long.parseLong(v))),
+          Map.entry("maxLifetime", (c, v) -> c.setMaxLifetime(Long.parseLong(v))),
+          Map.entry("keepaliveTime", (c, v) -> c.setKeepaliveTime(Long.parseLong(v))),
+          Map.entry("validationTimeout", (c, v) -> c.setValidationTimeout(Long.parseLong(v))),
+          Map.entry(
+              "leakDetectionThreshold",
+              (c, v) -> c.setLeakDetectionThreshold(Long.parseLong(v))),
+          Map.entry(
+              "initializationFailTimeout",
+              (c, v) -> c.setInitializationFailTimeout(Long.parseLong(v))),
+          Map.entry("maximumPoolSize", (c, v) -> c.setMaximumPoolSize(Integer.parseInt(v))),
+          Map.entry("minimumIdle", (c, v) -> c.setMinimumIdle(Integer.parseInt(v))),
+          Map.entry("poolName", (c, v) -> c.setPoolName(v)),
+          Map.entry("connectionTestQuery", (c, v) -> c.setConnectionTestQuery(v)),
+          Map.entry("connectionInitSql", (c, v) -> c.setConnectionInitSql(v)),
+          Map.entry("autoCommit", (c, v) -> c.setAutoCommit(Boolean.parseBoolean(v))),
+          Map.entry("readOnly", (c, v) -> c.setReadOnly(Boolean.parseBoolean(v))));
+  
   /**
    * Retrieves a {@link Connection} to the database.
    *

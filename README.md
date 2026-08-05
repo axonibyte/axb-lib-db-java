@@ -31,6 +31,32 @@ Two different operations share the name `close`, and the distinction matters:
 
 Note that the constructors fail fast: they open a connection while building, so
 an unreachable database is reported at construction rather than at first query.
+Pass `initializationFailTimeout` as a negative value to turn that off.
+
+## Pool settings
+
+The properties map given to the six-argument constructor carries two different
+kinds of thing, and they are now told apart:
+
+- **Pool settings** are applied to the pool itself. Recognised keys, using
+  Hikari's own names: `connectionTimeout`, `idleTimeout`, `maxLifetime`,
+  `keepaliveTime`, `validationTimeout`, `leakDetectionThreshold`,
+  `initializationFailTimeout`, `maximumPoolSize`, `minimumIdle`, `poolName`,
+  `connectionTestQuery`, `connectionInitSql`, `autoCommit`, `readOnly`. A value
+  that cannot be parsed, or that the setting rejects, fails construction rather
+  than being dropped.
+- **Everything else** is passed to the JDBC driver as a data source property,
+  which is what all of them used to be.
+
+> **Behaviour change in 0.5.0.** Every entry previously went to the driver, so
+> any pool setting in that map was accepted and then silently ignored — including
+> four in this library's own defaults. Deployments relying on those defaults have
+> been running on Hikari's values, and will now get the configured ones: a
+> 3-minute `maxLifetime` and a 30-second `idleTimeout`, both shorter than
+> Hikari's, so expect more connection turnover. `leakDetectionThreshold` was
+> raised from 5s to 60s at the same time — it had never been in force, and 5s is
+> short enough that `setup()`'s own connection would trip it on any project with
+> more than a handful of migration scripts.
 
 ## Bootstrap scripts
 

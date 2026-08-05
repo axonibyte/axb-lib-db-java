@@ -21,28 +21,25 @@ import static org.testng.Assert.assertThrows;
 import static org.testng.Assert.assertTrue;
 
 import java.sql.SQLException;
-
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
+import java.util.Map;
 
 import org.testng.annotations.Test;
 
 /**
  * Covers the pool's own lifecycle.
  *
- * <p>{@link Database} owns a {@link HikariDataSource} and had no way to dispose
+ * <p>{@link Database} owns a Hikari connection pool and had no way to dispose
  * of it: the field is private, and the only public {@code close} took a
  * connection, a statement and a result set. An application could return
  * connections to the pool and never shut the pool down, so its housekeeping
  * thread and idle connections outlived any orderly shutdown.
  *
  * <p>These run without a database, which needs one accommodation. Hikari fails
- * fast — the public constructors dial out while they build, and throw if
- * nothing answers — so a pool built through them cannot exist here at all. The
- * fixture below sets {@code initializationFailTimeout} negative, which is
- * Hikari's own switch for "do not connect at construction", and hands the
- * result to the package-private constructor. What is under test is the
- * lifecycle, not the dialling.
+ * fast — it dials out while the pool is built, and throws if nothing answers —
+ * so the fixture passes {@code initializationFailTimeout} negative, Hikari's
+ * own switch for "do not connect at construction". That this works at all is
+ * itself a property of the change these accompany: pool settings only reach the
+ * pool now. What is under test here is the lifecycle, not the dialling.
  *
  * @author Axonibyte Innovations, LLC
  */
@@ -54,19 +51,16 @@ public class DatabaseLifecycleTest {
    * <p>The address is deliberately one nothing is listening on: any test that
    * reached the network would be testing Hikari rather than this class.
    */
-  private static Database detached() {
-    HikariConfig config = new HikariConfig();
-    config.setDriverClassName("org.mariadb.jdbc.Driver");
-    config.setJdbcUrl("jdbc:mariadb://127.0.0.1:1/nodb");
-    config.setUsername("nobody");
-    config.setPassword("nothing");
-    // Negative disables the fail-fast probe entirely, so constructing the pool
-    // performs no I/O.
-    config.setInitializationFailTimeout(-1L);
-    // One connection, and do not go looking for it in the background.
-    config.setMaximumPoolSize(1);
-    config.setMinimumIdle(0);
-    return new Database(new HikariDataSource(config), "nodb", "t_");
+  static Database detached() throws SQLException {
+    return new Database(
+        "127.0.0.1:1/nodb", "t_", "nobody", "nothing", false,
+        Map.of(
+            // Negative disables the fail-fast probe, so building the pool
+            // performs no I/O at all.
+            "initializationFailTimeout", "-1",
+            // One connection, and do not go looking for it in the background.
+            "maximumPoolSize", "1",
+            "minimumIdle", "0"));
   }
 
   @Test public void isAutoCloseable() {
@@ -76,7 +70,7 @@ public class DatabaseLifecycleTest {
     assertTrue(AutoCloseable.class.isAssignableFrom(Database.class));
   }
 
-  @Test public void closesAndSaysSo() {
+  @Test public void closesAndSaysSo() throws SQLException {
     Database db = detached();
     assertFalse(db.isClosed(), "a fresh pool should be open");
 
@@ -84,7 +78,7 @@ public class DatabaseLifecycleTest {
     assertTrue(db.isClosed(), "the pool should report itself closed afterwards");
   }
 
-  @Test public void closingTwiceIsHarmless() {
+  @Test public void closingTwiceIsHarmless() throws SQLException {
     // Called from shutdown hooks, and sometimes from a try-with-resources that
     // a hook has already beaten to it.
     Database db = detached();
@@ -93,7 +87,7 @@ public class DatabaseLifecycleTest {
     assertTrue(db.isClosed());
   }
 
-  @Test public void tryWithResourcesClosesIt() {
+  @Test public void tryWithResourcesClosesIt() throws SQLException {
     Database escaped;
     try(Database db = detached()) {
       assertFalse(db.isClosed());
@@ -102,7 +96,7 @@ public class DatabaseLifecycleTest {
     assertTrue(escaped.isClosed(), "leaving the block should have closed the pool");
   }
 
-  @Test public void tryWithResourcesClosesItOnFailureToo() {
+  @Test public void tryWithResourcesClosesItOnFailureToo() throws SQLException {
     Database escaped = null;
     try(Database db = detached()) {
       escaped = db;
@@ -123,14 +117,14 @@ public class DatabaseLifecycleTest {
         "close() should not oblige callers to handle a checked exception");
   }
 
-  @Test public void connectingAfterCloseFails() {
+  @Test public void connectingAfterCloseFails() throws SQLException {
     // Rather than handing back a connection from a pool that no longer exists.
     Database db = detached();
     db.close();
     assertThrows(SQLException.class, () -> db.connect());
   }
 
-  @Test public void theOtherCloseStillTakesNulls() {
+  @Test public void theOtherCloseStillTakesNulls() throws SQLException {
     // `close()` and `close(Connection, PreparedStatement, ResultSet)` are
     // different operations that now share a name. This pins that adding the
     // no-argument one did not disturb the three-argument one, whose null
@@ -140,7 +134,7 @@ public class DatabaseLifecycleTest {
     }
   }
 
-  @Test public void metadataSurvivesClosing() {
+  @Test public void metadataSurvivesClosing() throws SQLException {
     // The prefix and name are read all over a dependent application, including
     // from shutdown paths that may run after the pool has gone.
     Database db = detached();

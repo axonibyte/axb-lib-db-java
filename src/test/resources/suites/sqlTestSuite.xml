@@ -8,6 +8,7 @@
       <class name="com.axonibyte.lib.db.SQLBuilderConjunctionTest" />
       <class name="com.axonibyte.lib.db.DatabaseScriptTest" />
       <class name="com.axonibyte.lib.db.DatabaseLifecycleTest" />
+      <class name="com.axonibyte.lib.db.DatabasePoolConfigTest" />
     </classes>
   </test>
 </suite>
