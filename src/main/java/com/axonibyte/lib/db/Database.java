@@ -26,6 +26,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -507,7 +508,6 @@ public class Database implements AutoCloseable {
    *         could not be read
    */
   public void setup(Class<?> clazz, String parent) throws SQLException {
-    PreparedStatement stmt = null;
     Set<String> fileList = new TreeSet<>();
 
     CodeSource src = clazz.getProtectionDomain().getCodeSource();
@@ -574,34 +574,78 @@ public class Database implements AutoCloseable {
         if(1 < statements.size())
           logger.debug("Script {} contains {} statements.", file, statements.size());
 
-        for(int i = 0; i < statements.size(); i++) {
-          stmt = null;
-          try {
-            stmt = con.prepareStatement(statements.get(i));
-            stmt.execute();
-          } catch(SQLException e) {
-            // Name the script and the statement within it. Without this a
-            // failure part-way through a multi-statement file reports only the
-            // syntax error, leaving the reader to work out which file -- and
-            // which part of it -- the server was talking about.
-            throw new SQLException(
-                String.format(
-                    "Bootstrap script %1$s failed at statement %2$d of %3$d: %4$s",
-                    file,
-                    i + 1,
-                    statements.size(),
-                    e.getMessage()),
-                e.getSQLState(),
-                e.getErrorCode(),
-                e);
-          } finally {
-            close(null, stmt, null);
-          }
-        }
+        runStatements(con, file, statements);
       }
     } finally {
       close(con, null, null);
     }
   }
-  
+
+  /**
+   * Executes the statements of one bootstrap script, in order, on one connection.
+   *
+   * <p>Through {@link Statement} rather than {@link PreparedStatement}, which is
+   * not a stylistic preference. The server's prepared-statement protocol accepts
+   * only a whitelist of commands, and {@code PREPARE}, {@code EXECUTE} and
+   * {@code DEALLOCATE PREPARE} are not on it -- preparing one is error 1295,
+   * "This command is not supported in the prepared statement protocol yet".
+   * Those three are how a script does anything conditionally: MariaDB has no
+   * {@code ALTER TABLE ... IF NOT EXISTS} for most changes, so an idempotent
+   * migration inspects {@code information_schema}, builds the statement it needs
+   * into a session variable, and prepares that. Every such script was therefore
+   * asking the server for something it refuses.
+   *
+   * <p>It did not fail outright only because MariaDB Connector/J catches that
+   * particular error and quietly re-runs the statement as text -- so the scripts
+   * did work, at the price of an error packet logged at WARN for every guarded
+   * statement on every boot, and of a schema whose correctness rested on an
+   * undocumented fallback in a driver that is free to drop it.
+   *
+   * <p>Nothing is lost by the change. A bootstrap script has no parameters to
+   * bind -- {@code ${database}} and {@code ${prefix}} are substituted into the
+   * text long before it is sent -- so preparing bought a round trip and a plan
+   * for a statement executed exactly once.
+   *
+   * <p>One {@link Statement} serves the whole script, and the caller's single
+   * connection serves the whole run. That matters for the same guarded scripts:
+   * a session variable belongs to the connection that set it, so a script that
+   * sets one and then prepares from it in the next statement is only correct
+   * while both land on the same connection.
+   *
+   * @param con the connection to execute on; held by the caller for the whole run
+   * @param file the name of the script, for error messages
+   * @param statements the statements it contains, in order
+   * @throws SQLException if any statement fails, naming the script and the
+   *         statement within it
+   */
+  static void runStatements(Connection con, String file, List<String> statements)
+      throws SQLException {
+    // A file that is entirely a licence header splits to nothing. Asking the
+    // connection for a statement to run none of them is pointless work.
+    if(statements.isEmpty()) return;
+
+    try(Statement stmt = con.createStatement()) {
+      for(int i = 0; i < statements.size(); i++) {
+        try {
+          stmt.execute(statements.get(i));
+        } catch(SQLException e) {
+          // Name the script and the statement within it. Without this a
+          // failure part-way through a multi-statement file reports only the
+          // syntax error, leaving the reader to work out which file -- and
+          // which part of it -- the server was talking about.
+          throw new SQLException(
+              String.format(
+                  "Bootstrap script %1$s failed at statement %2$d of %3$d: %4$s",
+                  file,
+                  i + 1,
+                  statements.size(),
+                  e.getMessage()),
+              e.getSQLState(),
+              e.getErrorCode(),
+              e);
+        }
+      }
+    }
+  }
+
 }
